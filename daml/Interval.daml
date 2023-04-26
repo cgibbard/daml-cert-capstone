@@ -1,0 +1,187 @@
+module Interval where
+
+import DA.Exception
+import Rational
+import Util (unless)
+
+template Interval
+  with
+    inf : Rational
+    sup : Rational
+    owner : Party
+    userAdmin : Party
+  where
+    signatory owner, userAdmin
+    key (inf, sup, owner, userAdmin) : (Rational, Rational, Party, Party)
+    maintainer key._3
+    ensure ratio 0 1 <= inf && inf < sup && sup <= ratio 1 1
+    choice Interval_Burn : ()
+      controller owner
+      do
+        return ()
+    choice Interval_Split : (ContractId Interval, ContractId Interval)
+      with
+        pt : Rational
+      controller owner
+      do
+        unless (inf < pt) (throw Interval_Split_E_PointLowerBound with ..)
+        unless (pt < sup) (throw Interval_Split_E_PointUpperBound with ..)
+        l <- create Interval with
+          sup = pt
+          ..
+        r <- create Interval with
+          inf = pt
+          ..
+        return (l,r)
+    choice Interval_Merge : ContractId Interval
+      with
+        rightwardId : ContractId Interval
+      controller owner
+      do
+        rightward <- fetch rightwardId
+        unless (this.sup == rightward.inf) (throw Interval_Merge_E_Adjacent)
+        unless (this.owner == rightward.owner) (throw Interval_Merge_E_Owner)
+        unless (this.userAdmin == rightward.userAdmin) (throw Interval_Merge_E_UserAdmin)
+        exercise rightwardId Interval_Burn
+        create Interval with
+          sup = rightward.sup
+          ..
+    choice Interval_OfferRequest : ContractId IntervalOfferRequest
+      with
+        to : Party
+        price : Text
+        paymentAuthority : Party
+      controller owner
+      do
+        unless (to /= owner) (throw Interval_OfferRequest_E_ToSelf)
+        unless (paymentAuthority /= owner) (throw Interval_OfferRequest_E_PaymentAuthoritySelf)
+        unless (paymentAuthority /= to) (throw Interval_OfferRequest_E_PaymentAuthorityTo)
+        unless (price /= "") (throw Interval_OfferRequest_E_PriceEmpty)
+        create IntervalOfferRequest with
+          from = owner
+          ..
+
+exception Interval_Split_E_PointLowerBound
+  with
+    inf : Rational
+    pt : Rational
+  where
+    message "Interval Split: Split point " <> show pt <> " must be strictly greater than inf " <> show inf
+
+exception Interval_Split_E_PointUpperBound
+  with
+    sup : Rational
+    pt : Rational
+  where
+    message "Interval Split: Split point " <> show pt <> " must be strictly less than sup " <> show sup
+
+exception Interval_Merge_E_Adjacent
+  where
+    message "Interval Merge: The supremum of the interval on which the Merge choice is taken must be the infimum of the interval which is its argument."
+
+exception Interval_Merge_E_Owner
+  where
+    message "Interval Merge: The owner of both intervals being joined must be the same"
+
+exception Interval_Merge_E_UserAdmin
+  where
+    message "Interval Merge: The user admin of both intervals being joined must be the same"
+
+exception Interval_OfferRequest_E_ToSelf
+  where
+    message "Interval OfferRequest: You are not allowed to offer a token to yourself"
+
+exception Interval_OfferRequest_E_PaymentAuthoritySelf
+  where
+    message "Interval OfferRequest: You may not be the payment authority for your own offer"
+
+exception Interval_OfferRequest_E_PaymentAuthorityTo
+  where
+    message "Interval OfferRequest: The counterparty to your offer may not be the payment authority"
+
+exception Interval_OfferRequest_E_PriceEmpty
+  where
+    message "Interval OfferRequest: The price field should be nonempty"
+
+template IntervalOfferRequest
+  with
+    inf : Rational
+    sup : Rational
+    from : Party
+    to : Party
+    price : Text
+    userAdmin : Party
+    paymentAuthority : Party
+  where
+    signatory from, userAdmin
+    observer paymentAuthority
+    choice IntervalOfferRequest_Approve : ContractId IntervalOffer
+      controller userAdmin, paymentAuthority
+      do
+        create IntervalOffer
+          with
+            ..
+
+template IntervalOffer
+  with
+    inf : Rational
+    sup : Rational
+    from : Party
+    to : Party
+    price : Text
+    userAdmin : Party
+    paymentAuthority : Party
+  where
+    key (inf, sup, from, to, userAdmin) : (Rational, Rational, Party, Party, Party)
+    maintainer key._3
+    signatory from, userAdmin, paymentAuthority
+    observer to
+    ensure from /= to && price /= "" && paymentAuthority /= from && paymentAuthority /= to
+    choice IntervalOffer_Retract : ContractId Interval
+      controller from
+      do
+        create Interval
+          with
+            owner = from
+            ..
+    choice IntervalOffer_Accept : ContractId IntervalPendingPayment
+      controller to, userAdmin
+      do
+        create IntervalPendingPayment
+          with
+            ..
+    choice IntervalOffer_Reject : ContractId Interval
+      controller to
+      do
+        create Interval
+          with
+            owner = from
+            ..
+
+template IntervalPendingPayment
+  with
+    inf : Rational
+    sup : Rational
+    from : Party
+    to : Party
+    price : Text
+    userAdmin : Party
+    paymentAuthority : Party
+  where
+    key (inf, sup, from, to, paymentAuthority) : (Rational, Rational, Party, Party, Party)
+    maintainer key._5
+    signatory from, to, userAdmin, paymentAuthority
+    choice IntervalPendingPayment_PaymentFailed : ContractId Interval
+      controller paymentAuthority
+      do
+        create Interval
+          with
+            owner = from
+            ..
+    choice IntervalPendingPayment_PaymentSuccessful : ContractId Interval
+      controller paymentAuthority
+      do
+        create Interval
+          with
+            owner = to
+            ..

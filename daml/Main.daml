@@ -1,0 +1,145 @@
+module Main where
+
+import Daml.Script
+import Interval
+import Rational
+import UserAdmin
+
+setup : Script ()
+setup = script do
+-- user_setup_begin
+  alice <- allocatePartyWithHint "Alice" (PartyIdHint "Alice")
+  bob <- allocatePartyWithHint "Bob" (PartyIdHint "Bob")
+  percival <- allocatePartyWithHint "Percival" (PartyIdHint "Percival")
+  userAdmin <- allocatePartyWithHint "UserAdmin" (PartyIdHint "UserAdmin")
+  aliceId <- validateUserId "Alice"
+  bobId <- validateUserId "Bob"
+  percivalId <- validateUserId "Percival"
+  userAdminId <- validateUserId "UserAdmin"
+  createUser (User aliceId (Some alice)) [CanActAs alice]
+  createUser (User bobId (Some bob)) [CanActAs bob]
+  createUser (User percivalId (Some percival)) [CanActAs percival]
+  createUser (User userAdminId (Some userAdmin)) [CanActAs userAdmin]
+-- user_setup_end
+
+  paymentAuthorityReq <- submit percival do
+    createCmd PaymentAuthorityRequest
+      with
+        paymentAuthority = percival
+        userAdmin = userAdmin
+  
+  paymentAuthority <- submit userAdmin do
+    exerciseCmd paymentAuthorityReq PaymentAuthorityRequest_Approve
+
+  aliceOwnerReq <- submit alice do
+    createCmd OwnerRequest
+      with
+        owner = alice
+        userAdmin = userAdmin
+        reason = "Signup"
+
+  aliceOwner <- submit userAdmin do
+    exerciseCmd aliceOwnerReq OwnerRequest_Approve
+
+  bobOwnerReq <- submit bob do
+    createCmd OwnerRequest
+      with
+        owner = bob
+        userAdmin = userAdmin
+        reason = "Signup"
+  
+  bobOwner <- submit userAdmin do
+    exerciseCmd bobOwnerReq OwnerRequest_Approve
+
+  -- Give alice the world
+  aliceI <- submitMulti [userAdmin, alice] [] do
+    createCmd Interval
+      with
+        inf = ratio 0 1
+        sup = ratio 1 1
+        owner = alice
+        userAdmin = userAdmin
+
+  (aliceI1,aliceI2) <- submit alice do
+    exerciseCmd aliceI Interval_Split
+      with
+        pt = ratio 2 3
+
+  offerABReq <- submit alice do
+    exerciseCmd aliceI2 Interval_OfferRequest
+      with
+        to = bob
+        price = "A goat, two chickens, and an Alphabet stock option of 35 shares at $110 USD on 2023/11/20"
+        paymentAuthority = percival
+
+  submitMustFail percival do
+    exerciseCmd offerABReq IntervalOfferRequest_Approve
+
+  offerAB <- submit percival do
+    exerciseCmd paymentAuthority PaymentAuthority_IntervalOfferRequest_Approve
+      with
+        offerRequestId = offerABReq
+
+  submitMustFail bob do
+    exerciseCmd offerAB IntervalOffer_Accept
+
+  acceptedOfferAB <- submit bob do
+    exerciseCmd bobOwner Owner_IntervalOffer_Accept with offerId = offerAB
+  
+  bobI <- submit percival do
+    exerciseCmd paymentAuthority PaymentAuthority_IntervalPendingPayment_PaymentSuccessful
+      with
+        pending = acceptedOfferAB
+
+  -- Ironically, this try/catch block doesn't catch the exception thrown from
+  -- the Interval_Split choice. The right thing to do would have been to make
+  -- exceptions serializable, so that they could be re-thrown in the Script
+  -- context and/or made available in a machine-readable form by the ledger API.
+  -- This would allow testing that the correct expected exceptions are thrown.
+  {-
+  (bobI1, bobI2) <-
+    try
+      submit bob do
+        exerciseCmd bobI Interval_Split with pt = ratio 1 2
+    catch
+      -- Interval_Split_E_PointLowerBound {}
+      (e : AnyException) ->
+        submit bob do
+          exerciseCmd bobI Interval_Split with pt = ratio 4 5
+  -}
+
+  submitMustFail bob do
+    exerciseCmd bobI Interval_Split with pt = ratio 1 2
+
+  (bobI1, bobI2) <- submit bob do
+    exerciseCmd bobI Interval_Split with pt = ratio 4 5
+
+  offerBAReq <- submit bob do
+    exerciseCmd bobI1 Interval_OfferRequest
+      with
+        to = alice
+        price = "Contractual agreement for Alice's estate to offer to purchase Bob's firstborn child's firstborn child's house at 150% of its market value on 2075/01/01"
+        paymentAuthority = percival
+
+  offerBA <- submit percival do
+    exerciseCmd paymentAuthority PaymentAuthority_IntervalOfferRequest_Approve
+      with
+        offerRequestId = offerBAReq
+
+  acceptedOfferBA <- submit alice do
+    exerciseCmd aliceOwner Owner_IntervalOffer_Accept with offerId = offerBA
+  
+  aliceI2' <- submit percival do
+    exerciseCmd paymentAuthority PaymentAuthority_IntervalPendingPayment_PaymentSuccessful
+      with
+        pending = acceptedOfferBA
+
+  aliceI' <- submit alice do
+    exerciseCmd aliceI1 Interval_Merge
+      with
+        rightwardId = aliceI2'
+
+  submitMustFail alice do
+    exerciseCmd bobI2 Interval_Split with pt = ratio 9 10
+
+  return ()

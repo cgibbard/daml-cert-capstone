@@ -1,0 +1,85 @@
+module Rational
+  ( divMod
+  , div
+  , mod
+  , gcd
+  , Rational(..)
+  , ratio
+  , reduce
+  )
+  where
+
+-- Compute the quotient and remainder of a division
+-- with the convention that the remainder should always be
+-- between 0 and the divisor (not including the divisor itself).
+divMod : Int -> Int -> (Int, Int)
+divMod n d =
+  if signum r == negate (signum d)
+    then (q - 1, r + d)
+    else (q, r)
+    where
+      q = n / d
+      r = n % d
+
+div : Int -> Int -> Int
+div a b = fst (divMod a b)
+
+mod : Int -> Int -> Int
+mod a b = snd (divMod a b)
+
+gcd : Int -> Int -> Int
+gcd a b
+  | b == 0    = a
+  | otherwise = gcd b (a `mod` b)
+
+-- Invariant: gcd (numerator p) (denominator p) = 1
+data Rational = Rational with
+  numerator : Int
+  denominator : Int
+    deriving (Eq, Show)
+
+instance Ord Rational where
+  (Rational xn xd) <= (Rational yn yd) = xn * yd <= yn * xd
+
+ratio : Int -> Int -> Rational
+ratio n m = reduce (n * signum m) (abs m)
+
+reduce : Int -> Int -> Rational
+reduce n m
+  | m == 0 = error "Rational: Can't produce a rational number with 0 denominator"
+  | otherwise = Rational with
+      numerator = n `div` d
+      denominator = m `div` d
+    where d = gcd n m
+
+instance Additive Rational where
+  Rational xn xd + Rational yn yd = ratio (xn * yd + xd * yn) (xd * yd)
+  aunit = Rational 0 1
+  negate (Rational n d) = Rational (-n) d
+
+instance Multiplicative Rational where
+  Rational xn xd * Rational yn yd = ratio (xn * yn) (xd * yd)
+  munit = Rational 1 1
+  p ^ n
+    | n < 0 = recip p ^ (-n)
+    | n == 0 = munit
+    | otherwise = pow p n munit
+
+-- Implement the power function recursively (why is there no default implementation for (^) at least?)
+pow : Multiplicative a => a -> Int -> a -> a
+pow p n q
+  | n % 2 == 0 = pow (p * p) (n / 2) q
+  | n == 1 = p
+  | otherwise = pow (p * p) (n / 2) (p * q)
+
+instance Divisible Rational where
+  p / q = p * recip q
+
+instance Fractional Rational where
+  recip (Rational n d) = ratio d n
+
+instance Number Rational
+
+instance Signed Rational where
+  signum (Rational n d) = Rational (signum n) 1
+  abs (Rational n d) = Rational (abs n) d

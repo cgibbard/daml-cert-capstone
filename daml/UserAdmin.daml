@@ -1,0 +1,83 @@
+module UserAdmin where
+
+import Interval
+
+template Owner
+  with
+    owner : Party
+    userAdmin : Party
+  where
+    signatory owner, userAdmin
+    nonconsuming choice Owner_IntervalOffer_Accept : (ContractId IntervalPendingPayment)
+      with
+        offerId : ContractId IntervalOffer
+      controller owner
+      do
+        exercise offerId IntervalOffer_Accept
+    choice Revoke : ()
+      controller userAdmin
+      do
+        return ()
+
+template OwnerRequest
+  with
+    owner : Party
+    userAdmin : Party
+    reason : Text
+  where
+    signatory owner
+    observer owner, userAdmin
+    choice OwnerRequest_Approve : ContractId Owner
+      controller userAdmin
+      do
+        create Owner with ..
+    choice OwnerRequest_Decline : ()
+      controller userAdmin
+      do
+        return ()
+
+template PaymentAuthority
+  with
+    paymentAuthority : Party
+    userAdmin : Party
+  where
+    signatory paymentAuthority, userAdmin
+    observer paymentAuthority, userAdmin
+    nonconsuming choice PaymentAuthority_IntervalOfferRequest_Approve : ContractId IntervalOffer
+      with
+        offerRequestId : ContractId IntervalOfferRequest
+      controller paymentAuthority
+      do
+        exercise offerRequestId IntervalOfferRequest_Approve
+    nonconsuming choice PaymentAuthority_IntervalPendingPayment_PaymentSuccessful : ContractId Interval
+      with
+        pending : ContractId IntervalPendingPayment
+      controller paymentAuthority
+      do
+        exercise pending IntervalPendingPayment_PaymentSuccessful
+    nonconsuming choice PaymentAuthority_IntervalPendingPayment_PaymentFailed : ContractId Interval
+      with
+        pending : ContractId IntervalPendingPayment
+      controller paymentAuthority
+      do
+        exercise pending IntervalPendingPayment_PaymentFailed    
+    choice PaymentAuthority_Revoke : ()
+      controller userAdmin
+      do
+        return ()
+
+template PaymentAuthorityRequest
+  with
+    paymentAuthority : Party
+    userAdmin : Party
+  where
+    signatory paymentAuthority
+    observer paymentAuthority, userAdmin
+    choice PaymentAuthorityRequest_Approve : ContractId PaymentAuthority
+      controller userAdmin
+      do
+        create PaymentAuthority with ..
+    choice PaymentAuthorityRequest_Decline : ()
+      controller userAdmin
+      do
+        return ()

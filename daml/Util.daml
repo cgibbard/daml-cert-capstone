@@ -1,0 +1,5 @@
+module Util where
+
+unless : Action m => Bool -> m () -> m ()
+unless True x = return ()
+unless False x = x
